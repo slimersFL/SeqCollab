@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>JAM — collaborative step sequencer</title>
+<style>
+  :root {
+    --bg: #f2f1e9;
+    --fg: #0d0b09;
+    --muted: #0d0b0988;
+    --accent: #ce6246;
+    --cell: 28px;
+    --cell-bg: #e5e3d9;
+    --cell-hover: #d9d7cd;
+    --border: #0d0b0922;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+  .app { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
+  header h1 { font-size: 28px; margin: 0; letter-spacing: 0.2em; font-weight: 700; }
+  header h1 span { color: var(--accent); }
+  .connect {
+    font: inherit; font-size: 11px; letter-spacing: 0.15em;
+    background: none; border: 1px solid var(--border);
+    padding: 6px 10px; cursor: pointer; color: var(--fg);
+  }
+  .connect.on { background: var(--accent); color: white; border-color: var(--accent); }
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    padding: 10px 0; margin-bottom: 18px;
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .toolbar button {
+    font: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    background: none; border: 1px solid var(--border);
+    padding: 6px 12px; cursor: pointer; color: var(--fg);
+  }
+  .toolbar button:hover { background: var(--cell-bg); }
+  .toolbar button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .toolbar button.primary:hover { background: #2a2724; }
+  .toolbar button.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .toolbar label { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .toolbar input[type="range"] { width: 110px; accent-color: var(--accent); }
+  .group { display: inline-flex; }
+  .group button { border-right-width: 0; }
+  .group button:last-child { border-right-width: 1px; }
+  .oct { display: inline-flex; align-items: center; gap: 6px; }
+  .oct button { padding: 4px 8px; min-width: 26px; }
+  .oct span { font-variant-numeric: tabular-nums; min-width: 18px; text-align: center; }
+  .grid { user-select: none; -webkit-user-select: none; touch-action: none; }
+  .grid-row {
+    display: grid;
+    grid-template-columns: 56px repeat(16, var(--cell));
+    gap: 3px;
+    margin-bottom: 3px;
+    align-items: center;
+  }
+  .label {
+    font-size: 10px; color: var(--muted);
+    letter-spacing: 0.1em; text-transform: uppercase;
+    text-align: right; padding-right: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .cell {
+    width: var(--cell); height: var(--cell);
+    background: var(--cell-bg); border-radius: 3px; cursor: pointer;
+    transition: background 60ms;
+    position: relative;
+  }
+  .cell:hover { background: var(--cell-hover); }
+  .cell.on { background: var(--fg); }
+  .cell.beat { box-shadow: inset 0 0 0 1px #0d0b0915; }
+  .cell.now { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .cell.on.now { background: var(--accent); outline-color: var(--accent); }
+  .hint {
+    color: var(--muted); font-size: 11px; margin-top: 18px;
+    letter-spacing: 0.05em; line-height: 1.6;
+  }
+  .hint code {
+    font-family: Monaco, Menlo, monospace;
+    background: #e5e3d9; padding: 1px 5px; border-radius: 3px; font-size: 10px;
+  }
+  .modal {
+    position: fixed; inset: 0; background: #0006;
+    display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  .modal-inner {
+    background: var(--bg); padding: 22px; width: min(480px, 92vw);
+    border-radius: 4px; border: 1px solid var(--border);
+  }
+  .modal-inner h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.2em; }
+  .modal-inner p { margin: 0 0 12px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .modal-inner textarea {
+    width: 100%; height: 170px; font-family: Monaco, Menlo, monospace;
+    font-size: 11px; padding: 10px; border: 1px solid var(--border);
+    background: white; resize: vertical;
+  }
+  .modal-inner .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .modal-inner a { color: var(--accent); }
+  @media (max-width: 640px) {
+    :root { --cell: 18px; }
+    .grid-row { grid-template-columns: 46px repeat(16, var(--cell)); gap: 2px; margin-bottom: 2px; }
+    header h1 { font-size: 22px; }
+    .toolbar { gap: 8px; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>J<span>A</span>M</h1>
+    <button class="connect" id="connect">CONNECT</button>
+  </header>
+
+  <div class="toolbar">
+    <button class="primary" id="play">Play</button>
+    <label>BPM <input type="range" min="50" max="200" value="110" id="bpm"> <span id="bpm-val">110</span></label>
+    <div class="group" id="tabs">
+      <button data-view="drums" class="active">Drums</button>
+      <button data-view="synth">Synth</button>
+    </div>
+    <div class="group" id="waves" style="display:none">
+      <button data-wave="square" class="active">SQR</button>
+      <button data-wave="triangle">TRI</button>
+      <button data-wave="sawtooth">SAW</button>
+    </div>
+    <label class="oct" id="oct-wrap" style="display:none">OCT
+      <button id="oct-down">−</button><span id="oct-val">0</span><button id="oct-up">+</button>
+    </label>
+    <button id="clear" style="margin-left:auto">Clear</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="hint">
+    click or drag to paint &middot; <code>space</code> play/stop &middot; <code>−</code>/<code>=</code> octave (synth) &middot;
+    hit <strong>CONNECT</strong> &amp; paste a Firebase config to jam with anyone on this URL
+  </div>
+</div>
+
+<script>
+(() => {
+  const STEPS = 16;
+  const DRUMS = ['KICK','SNARE','CLAP','HH','OH','TOM1','TOM2','RIM'];
+  const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B','C'];
+  const NOTE_SEMITONES = [0,1,2,3,4,5,6,7,8,9,10,11,12];
+  const BASE_FREQ = 261.6256;
+
+  const state = {
+    drums: DRUMS.map(() => new Array(STEPS).fill(false)),
+    synth: NOTE_NAMES.map(() => new Array(STEPS).fill(false)),
+    bpm: 110,
+    wave: 'square',
+    octave: 0,
+    playing: false,
+    step: 0,
+    view: 'drums',
+  };
+
+  let ac = null, master = null, nextTime = 0, schedulerId = null;
+  const LOOKAHEAD_MS = 25;
+  const SCHEDULE_AHEAD_S = 0.1;
+
+  function ensureAudio() {
+    if (!ac) {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      master = ac.createGain();
+      master.gain.value = 0.7;
+      master.connect(ac.destination);
+    }
+    if (ac.state === 'suspended') ac.resume();
+  }
+
+  let _noise = null;
+  function getNoise() {
+    if (_noise) return _noise;
+    const len = ac.sampleRate * 0.5;
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    _noise = buf;
+    return _noise;
+  }
+
+  function drumHit(idx, t) {
+    const name = DRUMS[idx];
+    const out = master;
+    if (name === 'KICK') {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.frequency.setValueAtTime(160, t);
+      o.frequency.exponentialRampToValueAtTime(40, t + 0.18);
+      g.gain.setValueAtTime(0.9, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      o.connect(g).connect(out); o.start(t); o.stop(t + 0.42);
+    } else if (name === 'SNARE') {
+      const n = ac.createBufferSource(); n.buffer = getNoise();
+      const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.8;
+      const ng = ac.createGain();
+      ng.gain.setValueAtTime(0.6, t);
+      ng.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+      n.connect(bp).connect(ng).connect(out); n.start(t); n.stop(t + 0.22);
+      const o = ac.createOscillator(), og = ac.createGain();
+      o.type = 'triangle'; o.frequency.value = 200;
+      og.gain.setValueAtTime(0.35, t);
+      og.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+      o.connect(og).connect(out); o.start(t); o.stop(t + 0.12);
+    } else if (name === 'CLAP') {
+      for (let i = 0; i < 3; i++) {
+        const n = ac.createBufferSource(); n.buffer = getNoise();
+        const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400;
+        const g = ac.createGain();
+        const at = t + i * 0.012;
+        g.gain.setValueAtTime(0.5, at);
+        g.gain.exponentialRampToValueAtTime(0.001, at + 0.09);
+        n.connect(bp).connect(g).connect(out); n.start(at); n.stop(at + 0.1);
+      }
+    } else if (name === 'HH' || name === 'OH') {
+      const n = ac.createBufferSource(); n.buffer = getNoise();
+      const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7500;
+      const g = ac.createGain();
+      const dec = name === 'OH' ? 0.32 : 0.055;
+      g.gain.setValueAtTime(0.3, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dec);
+      n.connect(hp).connect(g).connect(out); n.start(t); n.stop(t + dec + 0.02);
+    } else if (name === 'TOM1' || name === 'TOM2') {
+      const o = ac.createOscillator(), g = ac.createGain();
+      const base = name === 'TOM1' ? 180 : 120;
+      o.type = 'sine';
+      o.frequency.setValueAtTime(base, t);
+      o.frequency.exponentialRampToValueAtTime(base * 0.5, t + 0.22);
+      g.gain.setValueAtTime(0.7, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      o.connect(g).connect(out); o.start(t); o.stop(t + 0.3);
+    } else if (name === 'RIM') {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square'; o.frequency.value = 1700;
+      g.gain.setValueAtTime(0.25, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      o.connect(g).connect(out); o.start(t); o.stop(t + 0.06);
+    }
+  }
+
+  function synthHit(noteIdx, t) {
+    const semi = NOTE_SEMITONES[noteIdx] + state.octave * 12;
+    const freq = BASE_FREQ * Math.pow(2, semi / 12);
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = state.wave;
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + 0.4);
+  }
+
+  function scheduler() {
+    while (nextTime < ac.currentTime + SCHEDULE_AHEAD_S) {
+      const step = state.step;
+      const when = nextTime;
+      for (let i = 0; i < DRUMS.length; i++) if (state.drums[i][step]) drumHit(i, when);
+      for (let i = 0; i < NOTE_NAMES.length; i++) if (state.synth[i][step]) synthHit(i, when);
+      const delay = Math.max(0, (when - ac.currentTime) * 1000);
+      setTimeout(() => highlightStep(step), delay);
+      nextTime += (60 / state.bpm) / 4;
+      state.step = (step + 1) % STEPS;
+    }
+  }
+
+  function play() {
+    if (state.playing) return;
+    ensureAudio();
+    state.playing = true;
+    state.step = 0;
+    nextTime = ac.currentTime + 0.05;
+    schedulerId = setInterval(scheduler, LOOKAHEAD_MS);
+    document.getElementById('play').textContent = 'Stop';
+  }
+  function stop() {
+    state.playing = false;
+    clearInterval(schedulerId);
+    schedulerId = null;
+    state.step = 0;
+    highlightStep(-1);
+    document.getElementById('play').textContent = 'Play';
+  }
+  function togglePlay() { state.playing ? stop() : play(); }
+
+  let displayStep = -1;
+  function render() {
+    const grid = document.getElementById('grid');
+    const data = state.view === 'drums' ? state.drums : state.synth;
+    const labelsAll = state.view === 'drums'
+      ? DRUMS
+      : NOTE_NAMES.map((n, i) => n + (4 + state.octave + (i === NOTE_NAMES.length - 1 ? 1 : 0)));
+    const order = state.view === 'synth'
+      ? [...Array(data.length).keys()].reverse()
+      : [...Array(data.length).keys()];
+
+    const frag = document.createDocumentFragment();
+    order.forEach((rowIdx) => {
+      const rEl = document.createElement('div');
+      rEl.className = 'grid-row';
+      const l = document.createElement('div');
+      l.className = 'label';
+      l.textContent = labelsAll[rowIdx];
+      rEl.appendChild(l);
+      for (let s = 0; s < STEPS; s++) {
+        const c = document.createElement('div');
+        c.className = 'cell';
+        if (data[rowIdx][s]) c.classList.add('on');
+        if (s % 4 === 0) c.classList.add('beat');
+        c.dataset.row = rowIdx;
+        c.dataset.step = s;
+        rEl.appendChild(c);
+      }
+      frag.appendChild(rEl);
+    });
+    grid.replaceChildren(frag);
+    highlightStep(displayStep);
+  }
+
+  function highlightStep(step) {
+    displayStep = step;
+    document.querySelectorAll('.cell.now').forEach(c => c.classList.remove('now'));
+    if (step < 0) return;
+    document.querySelectorAll(`.cell[data-step="${step}"]`).forEach(c => c.classList.add('now'));
+  }
+
+  let dragActive = false, dragMode = null;
+
+  function setCell(row, step, val) {
+    const arr = state.view === 'drums' ? state.drums : state.synth;
+    if (arr[row][step] === val) return;
+    arr[row][step] = val;
+    const el = document.querySelector(`.cell[data-row="${row}"][data-step="${step}"]`);
+    if (el) el.classList.toggle('on', val);
+    scheduleSync();
+  }
+
+  function cellFromEvent(e) {
+    const t = e.touches ? e.touches[0] : e;
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    return el && el.classList.contains('cell') ? el : null;
+  }
+
+  function startDrag(el) {
+    const row = +el.dataset.row, step = +el.dataset.step;
+    const arr = state.view === 'drums' ? state.drums : state.synth;
+    dragActive = true;
+    dragMode = !arr[row][step];
+    setCell(row, step, dragMode);
+    if (dragMode) {
+      ensureAudio();
+      if (state.view === 'drums') drumHit(row, ac.currentTime);
+      else synthHit(row, ac.currentTime);
+    }
+  }
+
+  const grid = document.getElementById('grid');
+  grid.addEventListener('mousedown', (e) => {
+    const el = cellFromEvent(e); if (!el) return;
+    e.preventDefault(); startDrag(el);
+  });
+  grid.addEventListener('mouseover', (e) => {
+    if (!dragActive) return;
+    const el = e.target.closest('.cell'); if (!el) return;
+    setCell(+el.dataset.row, +el.dataset.step, dragMode);
+  });
+  window.addEventListener('mouseup', () => { dragActive = false; dragMode = null; });
+
+  grid.addEventListener('touchstart', (e) => {
+    const el = cellFromEvent(e); if (!el) return;
+    e.preventDefault(); startDrag(el);
+  }, { passive: false });
+  grid.addEventListener('touchmove', (e) => {
+    if (!dragActive) return;
+    const el = cellFromEvent(e); if (!el) return;
+    e.preventDefault();
+    setCell(+el.dataset.row, +el.dataset.step, dragMode);
+  }, { passive: false });
+  grid.addEventListener('touchend', () => { dragActive = false; dragMode = null; });
+
+  document.getElementById('play').addEventListener('click', togglePlay);
+
+  document.getElementById('clear').addEventListener('click', () => {
+    state.drums = state.drums.map(r => r.map(() => false));
+    state.synth = state.synth.map(r => r.map(() => false));
+    render(); scheduleSync();
+  });
+
+  const bpmInput = document.getElementById('bpm');
+  const bpmVal = document.getElementById('bpm-val');
+  bpmInput.addEventListener('input', (e) => {
+    state.bpm = +e.target.value;
+    bpmVal.textContent = state.bpm;
+    scheduleSync();
+  });
+
+  document.querySelectorAll('#tabs button').forEach(b => {
+    b.addEventListener('click', () => {
+      state.view = b.dataset.view;
+      document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.view === state.view));
+      document.getElementById('waves').style.display = state.view === 'synth' ? 'inline-flex' : 'none';
+      document.getElementById('oct-wrap').style.display = state.view === 'synth' ? 'inline-flex' : 'none';
+      render();
+    });
+  });
+
+  document.querySelectorAll('#waves button').forEach(b => {
+    b.addEventListener('click', () => {
+      state.wave = b.dataset.wave;
+      document.querySelectorAll('#waves button').forEach(x => x.classList.toggle('active', x.dataset.wave === state.wave));
+      scheduleSync();
+    });
+  });
+
+  function setOct(v) {
+    state.octave = Math.max(-2, Math.min(2, v));
+    document.getElementById('oct-val').textContent = state.octave > 0 ? '+' + state.octave : state.octave;
+    render(); scheduleSync();
+  }
+  document.getElementById('oct-down').addEventListener('click', () => setOct(state.octave - 1));
+  document.getElementById('oct-up').addEventListener('click', () => setOct(state.octave + 1));
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+    else if (e.key === '-' && state.view === 'synth') setOct(state.octave - 1);
+    else if ((e.key === '=' || e.key === '+') && state.view === 'synth') setOct(state.octave + 1);
+  });
+
+  let fb = null, roomRef = null, syncTimer = null, applyingRemote = false;
+
+  function scheduleSync() {
+    if (!fb || !roomRef || applyingRemote) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      fb.set(roomRef, {
+        drums: state.drums.map(r => r.map(b => b ? 1 : 0)),
+        synth: state.synth.map(r => r.map(b => b ? 1 : 0)),
+        bpm: state.bpm,
+        wave: state.wave,
+        octave: state.octave,
+        t: Date.now(),
+      });
+    }, 120);
+  }
+
+  async function connectFirebase(config) {
+    const appMod = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+    const dbMod  = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js');
+    const app = appMod.initializeApp(config);
+    const db = dbMod.getDatabase(app);
+    const room = (location.hash.slice(1) || 'global').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'global';
+    roomRef = dbMod.ref(db, 'jam/' + room);
+    fb = { db, ref: dbMod.ref, onValue: dbMod.onValue, set: dbMod.set };
+    dbMod.onValue(roomRef, (snap) => {
+      const v = snap.val();
+      if (!v) return;
+      applyingRemote = true;
+      try {
+        if (Array.isArray(v.drums) && v.drums.length === DRUMS.length)
+          state.drums = v.drums.map(r => r.map(b => !!b));
+        if (Array.isArray(v.synth) && v.synth.length === NOTE_NAMES.length)
+          state.synth = v.synth.map(r => r.map(b => !!b));
+        if (typeof v.bpm === 'number') { state.bpm = v.bpm; bpmInput.value = v.bpm; bpmVal.textContent = v.bpm; }
+        if (typeof v.wave === 'string') {
+          state.wave = v.wave;
+          document.querySelectorAll('#waves button').forEach(x => x.classList.toggle('active', x.dataset.wave === state.wave));
+        }
+        if (typeof v.octave === 'number') {
+          state.octave = v.octave;
+          document.getElementById('oct-val').textContent = state.octave > 0 ? '+' + state.octave : state.octave;
+        }
+        render();
+      } finally { applyingRemote = false; }
+    });
+    const btn = document.getElementById('connect');
+    btn.classList.add('on');
+    btn.textContent = 'CONNECTED · #' + room;
+    try { localStorage.setItem('jamFirebaseConfig', JSON.stringify(config)); } catch {}
+  }
+
+  document.getElementById('connect').addEventListener('click', () => {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-inner">
+        <h2>FIREBASE CONFIG</h2>
+        <p>Paste a <code>firebaseConfig</code> object (or JSON). Create one free at
+           <a href="https://console.firebase.google.com/" target="_blank" rel="noopener">console.firebase.google.com</a>
+           &rarr; Realtime Database. Add a <code>#room</code> to the URL to share a private room.</p>
+        <textarea placeholder='{
+  "apiKey": "...",
+  "databaseURL": "https://your-app.firebaseio.com",
+  "projectId": "..."
+}'></textarea>
+        <div class="row">
+          <button id="mc">Cancel</button>
+          <button id="mo" class="primary">Connect</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const ta = modal.querySelector('textarea');
+    try {
+      const saved = localStorage.getItem('jamFirebaseConfig');
+      if (saved) ta.value = saved;
+    } catch {}
+    modal.querySelector('#mc').onclick = () => modal.remove();
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    modal.querySelector('#mo').onclick = async () => {
+      try {
+        let txt = ta.value.trim();
+        const m = txt.match(/\{[\s\S]*\}/);
+        if (m) txt = m[0];
+        const cfg = (new Function('return ' + txt))();
+        if (!cfg || typeof cfg !== 'object') throw new Error('Not an object');
+        modal.remove();
+        await connectFirebase(cfg);
+      } catch (err) {
+        alert('Could not parse config: ' + err.message);
+      }
+    };
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
