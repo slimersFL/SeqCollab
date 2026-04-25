@@ -149,6 +149,15 @@
 
 <script>
 (() => {
+  const firebaseConfig = {
+  apiKey: "AIzaSyAwKfHmTYEe4gdFNKKmtTLK3Ewy69JmGKc",
+  authDomain: "jam-sequencer.firebaseapp.com",
+  databaseURL: "https://jam-sequencer-default-rtdb.firebaseio.com",
+  projectId: "jam-sequencer",
+  storageBucket: "jam-sequencer.firebasestorage.app",
+  messagingSenderId: "639644385625",
+  appId: "1:639644385625:web:4f6211906f7baaa736cc48"
+};
   const STEPS = 16;
   const DRUMS = ['KICK','SNARE','CLAP','HH','OH','TOM1','TOM2','RIM'];
   const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B','C'];
@@ -533,6 +542,10 @@
   });
 
   render();
+
+  if (FIREBASE_CONFIG) {
+    connectFirebase(FIREBASE_CONFIG).catch(err => console.error('Firebase auto-connect failed:', err));
+  }
 })();
 </script>
 </body>
