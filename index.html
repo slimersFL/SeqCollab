@@ -23,7 +23,6 @@
     -webkit-font-smoothing: antialiased;
     overscroll-behavior: none;
   }
-  
   .app { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
   header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
   header h1 { font-size: 28px; margin: 0; letter-spacing: 0.2em; font-weight: 700; }
@@ -107,11 +106,61 @@
   }
   .modal-inner .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   .modal-inner a { color: var(--accent); }
+  .chat {
+    position: fixed; bottom: 16px; right: 16px;
+    width: 280px; max-width: calc(100vw - 32px);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 16px #0d0b0922;
+    font-size: 12px;
+    z-index: 5;
+  }
+  .chat-header {
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; padding: 8px 12px;
+    font: inherit; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+    background: none; border: none; cursor: pointer; color: var(--fg);
+  }
+  .chat-header:hover { background: var(--cell-bg); }
+  .chat-header .arrow { color: var(--muted); font-size: 10px; }
+  .chat:not(.collapsed) .chat-header { border-bottom: 1px solid var(--border); }
+  .chat.collapsed .chat-body { display: none; }
+  .chat-body { display: flex; flex-direction: column; }
+  .chat-messages {
+    height: 200px; overflow-y: auto;
+    padding: 8px 12px;
+    display: flex; flex-direction: column; gap: 4px;
+    line-height: 1.4;
+  }
+  .chat-msg { word-wrap: break-word; }
+  .chat-msg .name { color: var(--accent); font-weight: 600; margin-right: 4px; }
+  .chat-msg .name.me { color: var(--fg); }
+  .chat-input-row { display: flex; border-top: 1px solid var(--border); }
+  .chat-input-row input {
+    flex: 1; min-width: 0; border: none; background: none;
+    padding: 8px 12px; font: inherit; font-size: 12px; color: var(--fg);
+    outline: none;
+  }
+  .chat-input-row button {
+    font: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    background: var(--fg); color: var(--bg);
+    border: none; padding: 0 14px; cursor: pointer;
+  }
+  .chat-input-row button:hover { background: #2a2724; }
+  .chat-me {
+    font-size: 10px; color: var(--muted);
+    padding: 4px 12px 6px; cursor: pointer;
+    border-top: 1px solid var(--border);
+    letter-spacing: 0.05em;
+  }
+  .chat-me:hover { color: var(--accent); }
   @media (max-width: 640px) {
     :root { --cell: 18px; }
     .grid-row { grid-template-columns: 46px repeat(16, var(--cell)); gap: 2px; margin-bottom: 2px; }
     header h1 { font-size: 22px; }
     .toolbar { gap: 8px; font-size: 11px; }
+    .chat { width: calc(100vw - 32px); }
+    .chat-messages { height: 160px; }
   }
 </style>
 </head>
@@ -148,17 +197,27 @@
   </div>
 </div>
 
+<div class="chat collapsed" id="chat" style="display:none">
+  <button class="chat-header" id="chat-toggle">
+    <span>Chat</span>
+    <span class="arrow" id="chat-arrow">▴</span>
+  </button>
+  <div class="chat-body">
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-input-row">
+      <input id="chat-input" placeholder="message…" maxlength="200" autocomplete="off">
+      <button id="chat-send">Send</button>
+    </div>
+    <div class="chat-me" id="chat-me" title="Click to rename"></div>
+  </div>
+</div>
+
 <script>
 (() => {
-  const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAwKfHmTYEe4gdFNKKmtTLK3Ewy69JmGKc",
-  authDomain: "jam-sequencer.firebaseapp.com",
-  databaseURL: "https://jam-sequencer-default-rtdb.firebaseio.com",
-  projectId: "jam-sequencer",
-  storageBucket: "jam-sequencer.firebasestorage.app",
-  messagingSenderId: "639644385625",
-  appId: "1:639644385625:web:4f6211906f7baaa736cc48"
-};
+  // Paste your firebaseConfig object here to auto-connect every visitor.
+  // Leave as null to require the manual CONNECT button.
+  const FIREBASE_CONFIG = {"apiKey":"AIzaSyAwKfHmTYEe4gdFNKKmtTLK3Ewy69JmGKc","authDomain":"jam-sequencer.firebaseapp.com","databaseURL":"https://jam-sequencer-default-rtdb.firebaseio.com","projectId":"jam-sequencer","storageBucket":"jam-sequencer.firebasestorage.app","messagingSenderId":"639644385625","appId":"1:639644385625:web:4f6211906f7baaa736cc48"};
+
   const STEPS = 16;
   const DRUMS = ['KICK','SNARE','CLAP','HH','OH','TOM1','TOM2','RIM'];
   const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B','C'];
@@ -449,6 +508,69 @@
   });
 
   let fb = null, roomRef = null, syncTimer = null, applyingRemote = false;
+  let sendChat = null;
+
+  let userName = localStorage.getItem('jamHandle') || '';
+  if (!userName) {
+    userName = 'user_' + Math.random().toString(16).slice(2, 6);
+    try { localStorage.setItem('jamHandle', userName); } catch {}
+  }
+
+  const chatEl = document.getElementById('chat');
+  const chatMessages = document.getElementById('chat-messages');
+  const chatInput = document.getElementById('chat-input');
+  const chatSend = document.getElementById('chat-send');
+  const chatToggle = document.getElementById('chat-toggle');
+  const chatArrow = document.getElementById('chat-arrow');
+  const chatMe = document.getElementById('chat-me');
+
+  function updateMeLabel() { chatMe.textContent = 'you · ' + userName + ' (click to rename)'; }
+  updateMeLabel();
+
+  chatMe.addEventListener('click', () => {
+    const next = prompt('Your handle (max 20 chars):', userName);
+    if (next == null) return;
+    const clean = next.trim().slice(0, 20).replace(/\s+/g, '_');
+    if (!clean) return;
+    userName = clean;
+    try { localStorage.setItem('jamHandle', userName); } catch {}
+    updateMeLabel();
+  });
+
+  chatToggle.addEventListener('click', () => {
+    chatEl.classList.toggle('collapsed');
+    const collapsed = chatEl.classList.contains('collapsed');
+    chatArrow.textContent = collapsed ? '▴' : '▾';
+    if (!collapsed) {
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      chatInput.focus();
+    }
+  });
+
+  function appendMessage(name, text) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg';
+    const n = document.createElement('span');
+    n.className = 'name';
+    if (name === userName) n.classList.add('me');
+    n.textContent = name + ':';
+    el.appendChild(n);
+    el.appendChild(document.createTextNode(' ' + text));
+    chatMessages.appendChild(el);
+    while (chatMessages.children.length > 100) chatMessages.removeChild(chatMessages.firstChild);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function sendCurrent() {
+    const text = chatInput.value.trim();
+    if (!text || !sendChat) return;
+    sendChat(text);
+    chatInput.value = '';
+  }
+  chatSend.addEventListener('click', sendCurrent);
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); sendCurrent(); }
+  });
 
   function scheduleSync() {
     if (!fb || !roomRef || applyingRemote) return;
@@ -498,6 +620,21 @@
     btn.classList.add('on');
     btn.textContent = 'CONNECTED · #' + room;
     try { localStorage.setItem('jamFirebaseConfig', JSON.stringify(config)); } catch {}
+
+    const chatRef = dbMod.ref(db, 'chat/' + room);
+    const chatQuery = dbMod.query(chatRef, dbMod.limitToLast(50));
+    dbMod.onChildAdded(chatQuery, (snap) => {
+      const m = snap.val();
+      if (m && typeof m.name === 'string' && typeof m.text === 'string') {
+        appendMessage(m.name, m.text);
+      }
+    });
+    sendChat = (text) => dbMod.push(chatRef, {
+      name: userName,
+      text: text.slice(0, 200),
+      t: dbMod.serverTimestamp(),
+    });
+    chatEl.style.display = 'block';
   }
 
   document.getElementById('connect').addEventListener('click', () => {
